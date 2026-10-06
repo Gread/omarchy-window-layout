@@ -1,0 +1,125 @@
+#!/bin/bash
+# Actions behind the Window Layout panel (gread.window-layout plugin).
+#
+# Usage: window-layout status [window-address]
+#        window-layout <action> <window-address> [argument]
+#        window-layout gaps|laptop|mirror
+#
+# The panel captures the window that was focused when it opened and passes its
+# address, because the panel holds keyboard focus while it is open. Arguments
+# are validated here before they reach the Lua given to hyprctl dispatch.
+# Failures go to stderr as a code (no_window, window_gone, invalid:…,
+# refused:…) that the panel translates.
+
+set -u
+
+TOGGLES="$HOME/.local/state/omarchy/toggles/hypr"
+
+die() {
+  echo "$*" >&2
+  exit 1
+}
+
+dispatch() {
+  local out
+  out=$(hyprctl dispatch "$1" 2>&1)
+  [[ $out == "ok" ]] || die "refused: $out"
+}
+
+# status [address]: that window (or the most recently focused one) plus the rest of the screen.
+status() {
+  local laptop=""
+  omarchy-hw-laptop 2>/dev/null && laptop=$(omarchy-hyprland-monitor-laptop 2>/dev/null)
+
+  jq -n \
+    --arg want "${1:-}" \
+    --argjson clients "$(hyprctl clients -j)" \
+    --argjson monitors "$(hyprctl monitors -j)" \
+    --argjson workspaces "$(hyprctl workspaces -j)" \
+    --arg laptop "$laptop" \
+    --argjson laptopOff "$([[ -f $TOGGLES/internal-monitor-disable.lua ]] && echo true || echo false)" \
+    --argjson mirror "$([[ -f $TOGGLES/internal-monitor-mirror.lua ]] && echo true || echo false)" \
+    --argjson gapsOff "$([[ -f $TOGGLES/window-no-gaps.lua ]] && echo true || echo false)" '
+    ($clients | map(select(.mapped and .workspace.id > 0))) as $all
+    | (($all | map(select(.address == $want)) | .[0]) // ($all | min_by(.focusHistoryID))) as $w
+    | ($monitors | map({key: (.id | tostring), value: .name}) | from_entries) as $monName
+    | {
+        window: (if $w then {
+          address: $w.address,
+          class: $w.class,
+          title: ($w.title[0:80]),
+          workspace: $w.workspace.id,
+          monitor: ($monName[$w.monitor | tostring] // ""),
+          floating: $w.floating,
+          fullscreen: $w.fullscreen,
+          pinned: $w.pinned
+        } else null end),
+        layout: (if $w then ($workspaces | map(select(.id == $w.workspace.id)) | .[0].tiledLayout // "") else "" end),
+        workspaces: ($workspaces | map(select(.id > 0) | .id) | sort),
+        monitors: ($monitors | map({name, model: (.model // .description), focused})),
+        laptop: $laptop,
+        laptopOff: $laptopOff,
+        mirror: $mirror,
+        gapsOff: $gapsOff
+      }'
+}
+
+action="${1:-}"
+
+case "$action" in
+  status) status "${2:-}"; exit ;;
+  gaps) omarchy-hyprland-window-gaps-toggle >/dev/null; exit ;;
+  laptop) omarchy-hyprland-monitor-internal toggle >/dev/null; exit ;;
+  mirror) omarchy-hyprland-monitor-internal-mirror toggle >/dev/null; exit ;;
+esac
+
+addr="${2:-}"
+arg="${3:-}"
+[[ $addr =~ ^0x[0-9a-fA-F]+$ ]] || die "no_window"
+hyprctl clients -j | jq -e --arg a "$addr" 'any(.[]; .address == $a)' >/dev/null ||
+  die "window_gone"
+W="address:$addr"
+
+# Split, swap, and layout act on the focused window.
+focus() {
+  dispatch "hl.dsp.focus({ window = \"$W\" })"
+}
+
+valid_monitor() {
+  [[ $arg =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid: monitor"
+}
+
+case "$action" in
+  fullscreen) dispatch "hl.dsp.window.fullscreen({ window = \"$W\", mode = \"fullscreen\", action = \"toggle\" })" ;;
+  maximize) dispatch "hl.dsp.window.fullscreen({ window = \"$W\", mode = \"maximized\", action = \"toggle\" })" ;;
+  float) dispatch "hl.dsp.window.float({ window = \"$W\", action = \"toggle\" })" ;;
+  pop) focus && omarchy-hyprland-window-pop >/dev/null ;;
+  close) dispatch "hl.dsp.window.close({ window = \"$W\" })" ;;
+  togglesplit) focus && dispatch 'hl.dsp.layout("togglesplit")' ;;
+  swapsplit) focus && dispatch 'hl.dsp.layout("swapsplit")' ;;
+  ratio)
+    # Share of the left/top side: 0.6 = 30%, 0.8 = 40%, 1.0 = 50%, 1.2 = 60%, 1.4 = 70%.
+    [[ $arg =~ ^(0\.6|0\.8|1\.0|1\.2|1\.4)$ ]] || die "invalid: ratio"
+    focus && dispatch "hl.dsp.layout(\"splitratio $arg exact\")"
+    ;;
+  swap)
+    [[ $arg =~ ^[lrud]$ ]] || die "invalid: direction"
+    focus && dispatch "hl.dsp.window.swap({ direction = \"$arg\" })"
+    ;;
+  workspace)
+    [[ $arg =~ ^([1-9]|10)$ ]] || die "invalid: workspace"
+    dispatch "hl.dsp.window.move({ window = \"$W\", workspace = \"$arg\", follow = false })"
+    ;;
+  monitor)
+    valid_monitor
+    dispatch "hl.dsp.window.move({ window = \"$W\", monitor = \"$arg\", follow = false })"
+    ;;
+  workspace-monitor)
+    valid_monitor
+    ws=$(hyprctl clients -j | jq -r --arg a "$addr" '.[] | select(.address == $a) | .workspace.id')
+    [[ $ws =~ ^[0-9]+$ ]] || die "window_gone"
+    dispatch "hl.dsp.workspace.move({ workspace = \"$ws\", monitor = \"$arg\" })"
+    ;;
+  layout) focus && omarchy-hyprland-workspace-layout-toggle >/dev/null ;;
+  *) die "invalid: action $action" ;;
+esac

@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "id": "gread.window-layout",
+  "name": "Window Layout",
+  "version": "1.0.0",
+  "author": "Gread",
+  "license": "MIT",
+  "description": "Arrange windows, splits, workspaces, and displays with the mouse from a bar panel",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Window Layout",
+    "description": "Fullscreen, split direction and ratios, swap and move windows, workspaces across displays",
+    "category": "System",
+    "aliases": [
+      "layout",
+      "windows",
+      "tiling",
+      "janelas"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "center",
+    "defaults": {
+      "language": "auto"
+    },
+    "schema": [
+      {
+        "key": "language",
+        "type": "enum",
+        "label": "Language",
+        "options": [
+          "auto",
+          "en",
+          "pt",
+          "sv"
+        ],
+        "defaultValue": "auto",
+        "description": "auto follows the system language"
+      }
+    ]
+  }
+}
