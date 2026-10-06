@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "gread.window-layout",
   "name": "Window Layout",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Gread",
   "license": "MIT",
-  "description": "Arrange windows, splits, workspaces, and displays with the mouse from a bar panel",
+  "description": "Arrange windows, splits, workspaces, and displays with the mouse from a bar panel; save and restore your workspace layout",
   "kinds": [
     "bar-widget"
   ],

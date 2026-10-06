@@ -1,0 +1,303 @@
+#!/bin/bash
+# Optional automations of the Window Layout plugin (gread.window-layout).
+#
+# Usage: session save               snapshot every workspace into layout.json
+#        session restore [--login]  reopen what is missing and put it back in place
+#        session login              restore once per Hyprland session, if enabled
+#        session dock removed|added|lid
+#                                   laptop display follows the external display,
+#                                   if enabled
+#        session config set <restoreOnLogin|laptopDock> <true|false>
+#
+# Settings and the saved layout live in ~/.config/gread.window-layout/; what
+# each run decided is logged to ~/.local/state/gread.window-layout/session.log.
+# Failures go to stderr as a code (no_layout, invalid:…) the panel translates.
+
+set -u
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/gread.window-layout"
+CONFIG="$CONFIG_DIR/config.json"
+LAYOUT="$CONFIG_DIR/layout.json"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/gread.window-layout"
+LOG="$STATE_DIR/session.log"
+RUN="${XDG_RUNTIME_DIR:-/tmp}/gread.window-layout"
+TOGGLE_FLAG="$HOME/.local/state/omarchy/toggles/hypr/internal-monitor-disable.lua"
+AUTO_ON="$RUN/laptop-display-auto-on"
+
+mkdir -p "$CONFIG_DIR" "$STATE_DIR" "$RUN"
+
+die() {
+  echo "$*" >&2
+  exit 1
+}
+
+log() {
+  [[ -f $LOG && $(stat -c %s "$LOG") -gt 200000 ]] && tail -n 1000 "$LOG" >"$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+  printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG"
+}
+
+setting() {
+  [[ -f $CONFIG ]] && jq -e --arg k "$1" '.[$k] == true' "$CONFIG" >/dev/null 2>&1
+}
+
+dispatch() {
+  local out
+  out=$(hyprctl dispatch "$1" 2>&1)
+  [[ $out == "ok" ]] || log "  hyprctl refused: $1 → $out"
+}
+
+# ---- Saving -------------------------------------------------------------------
+
+APP_DIRS=(
+  "${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+  "$HOME/.local/share/flatpak/exports/share/applications"
+  /var/lib/flatpak/exports/share/applications
+  /usr/local/share/applications
+  /usr/share/applications
+)
+
+# How to reopen a window of this class: an Omarchy web app URL, a desktop entry
+# named after the class or declaring it as StartupWMClass, or the window's own
+# executable.
+command_for() {
+  local class="$1" pid="$2" dir f id exe
+  if [[ $class =~ ^chrome-(.+)__(.*)-(Default|Profile_[0-9]+)$ ]]; then
+    echo "omarchy-launch-webapp https://${BASH_REMATCH[1]}/${BASH_REMATCH[2]//_//}"
+    return
+  fi
+  for dir in "${APP_DIRS[@]}"; do
+    for f in "$dir"/*.desktop; do
+      [[ -f $f ]] || continue
+      id=$(basename "$f" .desktop)
+      if [[ ${id,,} == "${class,,}" ]] || grep -qixF "StartupWMClass=$class" "$f"; then
+        echo "uwsm-app -- $id.desktop"
+        return
+      fi
+    done
+  done
+  exe=$(readlink -f "/proc/$pid/exe" 2>/dev/null)
+  [[ -n $exe && -x $exe ]] && echo "uwsm-app -- $exe"
+}
+
+save() {
+  local rows ws class pid commands="{}"
+  # Tiled windows on regular workspaces, left to right, top to bottom.
+  rows=$(hyprctl clients -j | jq -r '
+    [.[] | select(.mapped and .workspace.id > 0 and (.floating | not))]
+    | sort_by(.workspace.id, .at[0], .at[1]) | .[] | "\(.class)\t\(.pid)"')
+  [[ -n $rows ]] || die "no_window"
+
+  while IFS=$'\t' read -r class pid; do
+    jq -e --arg c "$class" 'has($c)' <<<"$commands" >/dev/null && continue
+    commands=$(jq --arg c "$class" --arg cmd "$(command_for "$class" "$pid")" '. + {($c): $cmd}' <<<"$commands")
+  done <<<"$rows"
+
+  hyprctl clients -j | jq --argjson commands "$commands" --arg at "$(date -Iseconds)" '
+    [.[] | select(.mapped and .workspace.id > 0 and (.floating | not))]
+    | sort_by(.workspace.id, .at[0], .at[1])
+    | group_by(.workspace.id)
+    | map(
+        . as $w
+        | ($w | length == 2 and $w[0].at[0] == $w[1].at[0]) as $stacked
+        | {
+            id: $w[0].workspace.id,
+            split: (if $stacked then "stacked" else "side" end),
+            ratio: (if ($w | length) == 2 then
+                      (if $stacked then 2 * $w[0].size[1] / ($w[0].size[1] + $w[1].size[1])
+                       else 2 * $w[0].size[0] / ($w[0].size[0] + $w[1].size[0]) end)
+                      | (. * 20 | round) / 20 | if . < 0.1 then 0.1 elif . > 1.9 then 1.9 else . end
+                    else 1 end),
+            apps: ($w | map({class, command: ($commands[.class] // "")}))
+          })
+    | {savedAt: $at, workspaces: .}' >"$LAYOUT.tmp" && mv "$LAYOUT.tmp" "$LAYOUT"
+
+  log "saved: $(jq -r '[.workspaces[] | "ws\(.id)=\([.apps[].class] | join("+"))"] | join(" ")' "$LAYOUT")"
+}
+
+# ---- Restoring ----------------------------------------------------------------
+
+# Windows of exactly this class, most recently focused first.
+windows_of() {
+  hyprctl clients -j | jq -r --arg c "$1" \
+    '[.[] | select(.mapped and .class == $c)] | sort_by(.focusHistoryID) | .[].address'
+}
+
+position_of() {
+  hyprctl clients -j | jq -r --arg a "$1" '.[] | select(.address == $a) | "\(.at[0]) \(.at[1])"'
+}
+
+launch_and_wait() {
+  local class="$1" cmd="$2" before addr
+  before=$(windows_of "$class")
+  log "  opening: $cmd"
+  setsid bash -c "$cmd" </dev/null >/dev/null 2>&1 &
+  for _ in $(seq 1 120); do
+    sleep 0.5
+    addr=$(windows_of "$class" | grep -v -x -F -f <(printf '%s' "$before") | head -1)
+    [[ -n $addr ]] && { echo "$addr"; return 0; }
+  done
+  return 1
+}
+
+restore() {
+  local login="${1:-}" start_ws count i ws class cmd addr used=" "
+  [[ -f $LAYOUT ]] || die "no_layout"
+
+  exec 7>"$RUN/restore.lock"
+  flock -n 7 || return 0
+
+  start_ws=$(hyprctl activeworkspace -j | jq -r .id)
+  log "restore${login:+ ($login)}"
+
+  count=$(jq '.workspaces | length' "$LAYOUT")
+  for ((i = 0; i < count; i++)); do
+    ws=$(jq -r ".workspaces[$i].id" "$LAYOUT")
+    [[ $ws =~ ^[0-9]+$ ]] || continue
+    local placed=()
+
+    while IFS=$'\t' read -r -u 3 class cmd; do
+      [[ -n $class ]] || continue
+      # An open window of this class that no earlier entry has claimed.
+      addr=$(windows_of "$class" | while read -r a; do [[ $used == *" $a "* ]] || { echo "$a"; break; }; done)
+      if [[ -z $addr ]]; then
+        if [[ -z $cmd ]]; then
+          log "  ws$ws: $class is not open and has no command"
+          continue
+        fi
+        addr=$(launch_and_wait "$class" "$cmd") || {
+          log "  ws$ws: no $class window appeared within 60 s"
+          continue
+        }
+      fi
+      used+="$addr "
+      if [[ $(hyprctl clients -j | jq -r --arg a "$addr" '.[] | select(.address == $a) | .workspace.id') != "$ws" ]]; then
+        dispatch "hl.dsp.window.move({ window = \"address:$addr\", workspace = \"$ws\", follow = false })"
+      fi
+      placed+=("$addr")
+      log "  ws$ws: $class → $addr"
+    done 3< <(jq -r ".workspaces[$i].apps[] | \"\(.class)\t\(.command)\"" "$LAYOUT")
+
+    # Two windows: same direction, same order, same ratio as when saved.
+    if ((${#placed[@]} == 2)); then
+      local split ratio first second fx fy sx sy
+      split=$(jq -r ".workspaces[$i].split" "$LAYOUT")
+      ratio=$(jq -r ".workspaces[$i].ratio" "$LAYOUT")
+      [[ $ratio =~ ^[0-9]+(\.[0-9]+)?$ ]] || ratio=1
+      first=${placed[0]} second=${placed[1]}
+      sleep 0.3
+      read -r fx fy < <(position_of "$first")
+      read -r sx sy < <(position_of "$second")
+      [[ -n ${fx:-} && -n ${sx:-} ]] || continue
+
+      dispatch "hl.dsp.focus({ window = \"address:$first\" })"
+      if [[ $split == "side" && $fx == "$sx" ]] || [[ $split == "stacked" && $fy == "$sy" ]]; then
+        dispatch 'hl.dsp.layout("togglesplit")'
+        sleep 0.2
+        read -r fx fy < <(position_of "$first")
+        read -r sx sy < <(position_of "$second")
+      fi
+      if { [[ $split == "side" ]] && ((fx > sx)); } || { [[ $split == "stacked" ]] && ((fy > sy)); }; then
+        dispatch 'hl.dsp.layout("swapsplit")'
+      fi
+      dispatch "hl.dsp.layout(\"splitratio $ratio exact\")"
+      log "  ws$ws: $split, ratio $ratio"
+    fi
+  done
+
+  # At login end on the first saved workspace; otherwise back where you were.
+  local end_ws=$start_ws
+  [[ $login == "--login" ]] && end_ws=$(jq -r '.workspaces[0].id // 1' "$LAYOUT")
+  [[ $end_ws =~ ^[0-9]+$ ]] && dispatch "hl.dsp.focus({ workspace = \"$end_ws\" })"
+  log "restore done"
+}
+
+# Once per Hyprland session: the shell restarts within a session must not
+# restore again.
+login() {
+  setting restoreOnLogin || return 0
+  [[ -f $LAYOUT ]] || return 0
+  local marker="$RUN/restored-${HYPRLAND_INSTANCE_SIGNATURE:-session}"
+  exec 6>"$RUN/login.lock"
+  flock -n 6 || return 0
+  [[ -e $marker ]] && return 0
+  touch "$marker"
+  sleep 3 # let the session environment and the network come up
+  restore --login
+}
+
+# ---- Laptop dock -----------------------------------------------------------
+#
+# For people who turn the laptop display off while docked (Super+Ctrl+Delete).
+# Omarchy's own recover counts Hyprland's virtual FALLBACK output as an active
+# external display, so unplugging leaves every screen dark.
+
+monitors() {
+  hyprctl monitors all -j | jq -r -c '[.[] | "\(.name):\(if .disabled then "off" else "on" end)"] | join(" ")'
+}
+
+external_active() {
+  hyprctl monitors all -j | jq -e '.[]
+    | select(.name | test("^(eDP|LVDS|DSI)-|^FALLBACK$|^HEADLESS-") | not)
+    | select(.disabled == false)' >/dev/null
+}
+
+dock() {
+  local event="$1" attempt
+  setting laptopDock || return 0
+  omarchy-hw-laptop 2>/dev/null || return 0
+
+  exec 5>"$RUN/dock.lock"
+  flock -w 15 5 || return 0
+
+  case "$event" in
+    removed | lid)
+      # Right after an unplug Hyprland can still list the display that left.
+      for attempt in 1 2 3 4 5 6; do
+        sleep 1
+        [[ -f $TOGGLE_FLAG ]] || return 0
+        omarchy-hw-laptop-closed && return 0
+        if ! external_active; then
+          touch "$AUTO_ON"
+          omarchy-hyprland-monitor-internal on
+          log "dock $event: laptop display on (attempt $attempt; now: $(monitors))"
+          return 0
+        fi
+      done
+      [[ $event == removed ]] && log "dock removed: an external display is still active ($(monitors))"
+      ;;
+    added)
+      sleep 1
+      [[ -f $AUTO_ON ]] || return 0
+      external_active || return 0
+      rm -f "$AUTO_ON"
+      omarchy-hyprland-monitor-internal off
+      log "dock added: laptop display off again ($(monitors))"
+      ;;
+  esac
+}
+
+# ---- Settings -------------------------------------------------------------
+
+config_set() {
+  local key="$1" value="$2"
+  [[ $key =~ ^(restoreOnLogin|laptopDock)$ ]] || die "invalid: key"
+  [[ $value =~ ^(true|false)$ ]] || die "invalid: value"
+  [[ -f $CONFIG ]] || echo '{}' >"$CONFIG"
+  jq --arg k "$key" --argjson v "$value" '.[$k] = $v' "$CONFIG" >"$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
+  log "config: $key = $value"
+}
+
+case "${1:-}" in
+  save) save ;;
+  restore) restore "${2:-}" ;;
+  login) login ;;
+  dock)
+    [[ ${2:-} =~ ^(removed|added|lid)$ ]] || die "invalid: event"
+    dock "$2"
+    ;;
+  config)
+    [[ ${2:-} == "set" ]] || die "invalid: config"
+    config_set "${3:-}" "${4:-}"
+    ;;
+  *) die "invalid: action" ;;
+esac

@@ -14,6 +14,7 @@
 set -u
 
 TOGGLES="$HOME/.local/state/omarchy/toggles/hypr"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/gread.window-layout"
 
 die() {
   echo "$*" >&2
@@ -39,7 +40,9 @@ status() {
     --arg laptop "$laptop" \
     --argjson laptopOff "$([[ -f $TOGGLES/internal-monitor-disable.lua ]] && echo true || echo false)" \
     --argjson mirror "$([[ -f $TOGGLES/internal-monitor-mirror.lua ]] && echo true || echo false)" \
-    --argjson gapsOff "$([[ -f $TOGGLES/window-no-gaps.lua ]] && echo true || echo false)" '
+    --argjson gapsOff "$([[ -f $TOGGLES/window-no-gaps.lua ]] && echo true || echo false)" \
+    --argjson config "$(jq -c . "$CONFIG_DIR/config.json" 2>/dev/null || echo '{}')" \
+    --argjson saved "$(jq -c '{savedAt, workspaces: (.workspaces | length), apps: ([.workspaces[].apps[]] | length)}' "$CONFIG_DIR/layout.json" 2>/dev/null || echo null)" '
     ($clients | map(select(.mapped and .workspace.id > 0))) as $all
     | (($all | map(select(.address == $want)) | .[0]) // ($all | min_by(.focusHistoryID))) as $w
     | ($monitors | map({key: (.id | tostring), value: .name}) | from_entries) as $monName
@@ -60,7 +63,10 @@ status() {
         laptop: $laptop,
         laptopOff: $laptopOff,
         mirror: $mirror,
-        gapsOff: $gapsOff
+        gapsOff: $gapsOff,
+        restoreOnLogin: ($config.restoreOnLogin == true),
+        laptopDock: ($config.laptopDock == true),
+        saved: $saved
       }'
 }
 

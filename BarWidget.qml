@@ -1,6 +1,8 @@
 import QtQuick
 import qs.Commons
 import Quickshell
+import Quickshell.Hyprland
+import Quickshell.Io
 import qs.Ui
 import "Strings.js" as Strings
 
@@ -45,6 +47,60 @@ BarWidget {
 
   onBarChanged: injectPanel()
   onSettingsChanged: injectPanel()
+
+  // ---- Optional automations (bin/session reads ~/.config/gread.window-layout
+  // and returns at once when an option is off). Every bar instance runs this;
+  // the script locks and remembers what it already did.
+  readonly property string sessionScript: Qt.resolvedUrl("bin/session").toString().replace(/^file:\/\//, "")
+  property string pendingDock: ""
+
+  // Restore the saved layout once per Hyprland session.
+  Component.onCompleted: loginProc.running = true
+
+  Process {
+    id: loginProc
+    command: ["bash", root.sessionScript, "login"]
+  }
+
+  function dock(event) {
+    if (dockProc.running) {
+      root.pendingDock = event
+      return
+    }
+    dockProc.command = ["bash", root.sessionScript, "dock", event]
+    dockProc.running = true
+  }
+
+  Process {
+    id: dockProc
+    onExited: function() {
+      if (root.pendingDock === "") return
+      var next = root.pendingDock
+      root.pendingDock = ""
+      root.dock(next)
+    }
+  }
+
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      var name = event.name
+      if (name === "monitorremovedv2") root.dock("removed")
+      else if (name === "monitoraddedv2") root.dock("added")
+    }
+  }
+
+  // No real display left (only Hyprland's virtual FALLBACK): typically the lid
+  // opened, or the system resumed, while the laptop display was off.
+  Timer {
+    interval: 3000
+    repeat: true
+    running: true
+    onTriggered: {
+      var real = Hyprland.monitors.values.filter(function(m) { return !/^(FALLBACK|HEADLESS-)/.test(m.name) })
+      if (real.length === 0) root.dock("lid")
+    }
+  }
 
   Loader {
     id: panelLoader

@@ -31,6 +31,15 @@ var dictionaries = {
     laptopDisplay: "Laptop display",
     mirrorLaptop: "Mirror laptop",
     laptop: "Laptop",
+    sectionSaved: "SAVED LAYOUT",
+    saveCurrent: "Save current",
+    restore: "Restore",
+    restoreOnLogin: "Restore at login",
+    savedSummary: "%1 apps on %2 workspaces · saved %3",
+    nothingSaved: "Nothing saved yet: arrange your workspaces, then save",
+    laptopDock: "Automatic laptop display",
+    laptopDockHint: "On when the external display is unplugged, off again when it is back",
+    errNoLayout: "Save a layout first",
     errStatus: "Couldn't read the window state",
     errWindowGone: "That window no longer exists",
     errInvalid: "Invalid request",
@@ -64,6 +73,15 @@ var dictionaries = {
     laptopDisplay: "Tela do notebook",
     mirrorLaptop: "Espelhar notebook",
     laptop: "Notebook",
+    sectionSaved: "LAYOUT SALVO",
+    saveCurrent: "Salvar atual",
+    restore: "Restaurar",
+    restoreOnLogin: "Restaurar no login",
+    savedSummary: "%1 apps em %2 workspaces · salvo em %3",
+    nothingSaved: "Nada salvo ainda: organize os workspaces e salve",
+    laptopDock: "Tela do notebook automática",
+    laptopDockHint: "Liga ao tirar o monitor externo e desliga quando ele volta",
+    errNoLayout: "Salve um layout primeiro",
     errStatus: "Não consegui ler o estado das janelas",
     errWindowGone: "Essa janela não existe mais",
     errInvalid: "Pedido inválido",
@@ -97,6 +115,15 @@ var dictionaries = {
     laptopDisplay: "Bärbar skärm",
     mirrorLaptop: "Spegla bärbar",
     laptop: "Bärbar",
+    sectionSaved: "SPARAD LAYOUT",
+    saveCurrent: "Spara nuvarande",
+    restore: "Återställ",
+    restoreOnLogin: "Återställ vid inloggning",
+    savedSummary: "%1 appar på %2 arbetsytor · sparad %3",
+    nothingSaved: "Inget sparat än: ordna arbetsytorna och spara",
+    laptopDock: "Automatisk bärbar skärm",
+    laptopDockHint: "På när den externa skärmen kopplas ur, av igen när den är tillbaka",
+    errNoLayout: "Spara en layout först",
     errStatus: "Kunde inte läsa fönsterstatus",
     errWindowGone: "Fönstret finns inte längre",
     errInvalid: "Ogiltig begäran",
@@ -126,6 +153,7 @@ function errorText(lang, raw) {
   var code = String(raw || "").split(":")[0].trim()
   switch (code) {
   case "no_window": return tr(lang, "noWindow")
+  case "no_layout": return tr(lang, "errNoLayout")
   case "window_gone": return tr(lang, "errWindowGone")
   case "invalid": return tr(lang, "errInvalid")
   case "refused": return tr(lang, "errRefused")

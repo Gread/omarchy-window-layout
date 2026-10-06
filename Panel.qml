@@ -16,6 +16,7 @@ Panel {
   readonly property var barIdentity: hostWidget || root
 
   readonly property string script: Qt.resolvedUrl("bin/window-layout").toString().replace(/^file:\/\//, "")
+  readonly property string sessionScript: Qt.resolvedUrl("bin/session").toString().replace(/^file:\/\//, "")
   readonly property int maxOutputChars: 32768
 
   readonly property color fg: root.bar ? root.bar.foreground : Color.foreground
@@ -44,6 +45,7 @@ Panel {
   readonly property bool hasWindow: win !== null && target !== ""
   readonly property bool tiled: hasWindow && !win.floating && win.fullscreen === 0
   readonly property bool dwindle: info ? info.layout === "dwindle" : false
+  readonly property bool hasSaved: info ? info.saved !== null && info.saved !== undefined : false
   readonly property var otherMonitors: {
     if (!info || !win) return []
     return info.monitors.filter(function(m) { return m.name !== win.monitor })
@@ -86,6 +88,16 @@ Panel {
     if (statusProc.running) statusProc.running = false
     statusProc.command = root.command(root.target ? ["status", root.target] : ["status"])
     statusProc.running = true
+  }
+
+  // Saved layout and settings (bin/session). Restoring can take a while: it
+  // waits for every missing app to open.
+  function session(args, seconds) {
+    if (root.busy) return
+    root.busy = true
+    root.errorText = ""
+    actionProc.command = ["timeout", "-k", "2", String(seconds || 10), "bash", root.sessionScript].concat(args)
+    actionProc.running = true
   }
 
   // Window actions carry the captured address; gaps/laptop/mirror are global.
@@ -348,6 +360,39 @@ Panel {
             }
           }
 
+          // ---- Saved layout
+          PanelSectionHeader { text: root.tr("sectionSaved"); foreground: root.fg; fontFamily: root.fontFamily }
+
+          Row {
+            spacing: root.gap
+            Btn { width: root.cell(2); icon: "󰆓"; label: root.tr("saveCurrent"); onClicked: root.session(["save"]) }
+            Btn {
+              width: root.cell(2)
+              icon: "󰑓"
+              label: root.tr("restore")
+              available: root.hasSaved
+              onClicked: root.session(["restore"], 300)
+            }
+          }
+
+          Btn {
+            width: root.innerWidth
+            icon: "󰍃"
+            label: root.tr("restoreOnLogin")
+            active: root.info ? root.info.restoreOnLogin : false
+            available: root.hasSaved
+            onClicked: root.session(["config", "set", "restoreOnLogin", String(!root.info.restoreOnLogin)])
+          }
+
+          Hint {
+            width: root.innerWidth
+            wrapMode: Text.WordWrap
+            text: root.hasSaved
+              ? root.tr("savedSummary", root.info.saved.apps, root.info.saved.workspaces,
+                  Qt.formatDateTime(new Date(root.info.saved.savedAt), "yyyy-MM-dd HH:mm"))
+              : root.tr("nothingSaved")
+          }
+
           // ---- Displays (laptops only)
           PanelSectionHeader {
             visible: root.info ? root.info.laptop !== "" : false
@@ -375,6 +420,22 @@ Panel {
               active: root.info ? root.info.mirror : false
               onClicked: root.act("mirror")
             }
+          }
+
+          Btn {
+            visible: root.info ? root.info.laptop !== "" : false
+            width: root.innerWidth
+            icon: "󰛧"
+            label: root.tr("laptopDock")
+            active: root.info ? root.info.laptopDock : false
+            onClicked: root.session(["config", "set", "laptopDock", String(!root.info.laptopDock)])
+          }
+
+          Hint {
+            visible: root.info ? root.info.laptop !== "" : false
+            width: root.innerWidth
+            wrapMode: Text.WordWrap
+            text: root.tr("laptopDockHint")
           }
 
           Text {
