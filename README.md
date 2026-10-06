@@ -5,7 +5,7 @@ Click the icon in the bar and every tiling move you would otherwise do with a
 keybinding is one click away: fullscreen, split direction, split ratios, swapping
 windows, sending them to other workspaces or displays, and more.
 
-<img src="preview.png" alt="Window Layout panel" width="380">
+<img src="preview.png?v=1.1.0" alt="Window Layout panel" width="380">
 
 ## What's in the panel
 
