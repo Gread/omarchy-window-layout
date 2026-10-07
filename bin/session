@@ -247,7 +247,7 @@ dock() {
   omarchy-hw-laptop 2>/dev/null || return 0
 
   exec 5>"$RUN/dock.lock"
-  flock -w 15 5 || return 0
+  flock -w 15 5 || { log "dock $event: skipped, another run held the lock for 15 s"; return 0; }
 
   case "$event" in
     removed | lid)
@@ -266,12 +266,27 @@ dock() {
       [[ $event == removed ]] && log "dock removed: an external display is still active ($(monitors))"
       ;;
     added)
-      sleep 1
+      # Only undo what this automation did. After a resume the external display
+      # can take several seconds to come up, so keep checking for a while.
       [[ -f $AUTO_ON ]] || return 0
-      external_active || return 0
-      rm -f "$AUTO_ON"
-      omarchy-hyprland-monitor-internal off
-      log "dock added: laptop display off again ($(monitors))"
+      # Already off (e.g. you pressed Super+Ctrl+Delete yourself): nothing left
+      # to undo, and a stale marker must not turn it off later.
+      if [[ -f $TOGGLE_FLAG ]]; then
+        rm -f "$AUTO_ON"
+        log "dock added: laptop display was already off, cleared the marker"
+        return 0
+      fi
+      for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        sleep 1
+        [[ -f $AUTO_ON ]] || return 0
+        if external_active; then
+          rm -f "$AUTO_ON"
+          omarchy-hyprland-monitor-internal off
+          log "dock added: laptop display off again (attempt $attempt; now: $(monitors))"
+          return 0
+        fi
+      done
+      log "dock added: no external display became active within 10 s ($(monitors))"
       ;;
   esac
 }

@@ -54,8 +54,13 @@ BarWidget {
   readonly property string sessionScript: Qt.resolvedUrl("bin/session").toString().replace(/^file:\/\//, "")
   property string pendingDock: ""
 
-  // Restore the saved layout once per Hyprland session.
-  Component.onCompleted: loginProc.running = true
+  // Restore the saved layout once per Hyprland session. Also catch up on a
+  // display plugged in while the shell was down (it restarts around resume),
+  // whose monitoradded event this widget never heard.
+  Component.onCompleted: {
+    loginProc.running = true
+    root.dock("added")
+  }
 
   Process {
     id: loginProc
