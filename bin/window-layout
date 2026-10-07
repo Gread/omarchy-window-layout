@@ -70,10 +70,29 @@ status() {
       }'
 }
 
+# keys: {"<bind description>": "Super+Shift+←", ...} from Omarchy's keybinding
+# list, so hints follow the user's own bindings.
+keys() {
+  omarchy menu keybindings --print 2>/dev/null |
+    sed -n 's/^\(.*[^ ]\)  *→ \(.*\)$/\1\t\2/p' |
+    jq -R -s '
+      def word: ascii_downcase | (.[0:1] | ascii_upcase) + .[1:];
+      def keyname:
+        {"LEFT": "←", "RIGHT": "→", "UP": "↑", "DOWN": "↓", "MINUS": "-", "EQUAL": "=", "COMMA": ","}[.]
+        // (if length == 1 then . else word end);
+      def combo:
+        split(" + ") as $p
+        | if ($p | length) == 1 then ($p[0] | keyname)
+          else (($p[0] | split(" ") | map(word)) + [$p[1] | keyname]) | join("+") end;
+      split("\n") | map(select(length > 0) | split("\t") | {key: .[1], value: (.[0] | combo)})
+      | from_entries'
+}
+
 action="${1:-}"
 
 case "$action" in
   status) status "${2:-}"; exit ;;
+  keys) keys; exit ;;
   gaps) omarchy-hyprland-window-gaps-toggle >/dev/null; exit ;;
   laptop) omarchy-hyprland-monitor-internal toggle >/dev/null; exit ;;
   mirror) omarchy-hyprland-monitor-internal-mirror toggle >/dev/null; exit ;;

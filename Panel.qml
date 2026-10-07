@@ -40,6 +40,8 @@ Panel {
   property string target: ""
   property bool busy: false
   property string errorText: ""
+  // Bind description → key combo, read once per opening (bin/window-layout keys).
+  property var keys: ({})
 
   readonly property var win: info && info.window ? info.window : null
   readonly property bool hasWindow: win !== null && target !== ""
@@ -58,6 +60,7 @@ Panel {
 
   function open() {
     root.target = ""
+    if (!keysProc.running) keysProc.running = true
     root.errorText = ""
     root.controller.show()
     refreshStatus()
@@ -113,6 +116,27 @@ Panel {
     root.errorText = ""
     actionProc.command = root.command(args)
     actionProc.running = true
+  }
+
+  function hotkey(description) {
+    return root.keys && root.keys[description] ? root.keys[description] : ""
+  }
+
+  // Moving a workspace is bound per direction; show them as one hint.
+  function directionalHotkey() {
+    var left = root.hotkey("Move workspace to left monitor")
+    return left.slice(-1) === "←" ? left.slice(0, -1) + "← → ↑ ↓" : left
+  }
+
+  Process {
+    id: keysProc
+    command: ["timeout", "-k", "2", "10", "bash", root.script, "keys"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        try { root.keys = JSON.parse(String(text || "{}").slice(0, root.maxOutputChars)) } catch (e) {}
+      }
+    }
   }
 
   Process {
@@ -242,11 +266,11 @@ Panel {
           Grid {
             columns: 3
             spacing: root.gap
-            Btn { width: root.cell(3); icon: "󰊓"; label: root.tr("fullscreen"); active: root.hasWindow && root.win.fullscreen === 2; available: root.hasWindow; onClicked: root.act("fullscreen") }
-            Btn { width: root.cell(3); icon: "󰁌"; label: root.tr("maximize"); active: root.hasWindow && root.win.fullscreen === 1; available: root.hasWindow; onClicked: root.act("maximize") }
-            Btn { width: root.cell(3); icon: "󰖲"; label: root.tr("float"); active: root.hasWindow && root.win.floating; available: root.hasWindow; onClicked: root.act("float") }
-            Btn { width: root.cell(3); icon: "󰐃"; label: root.tr("pin"); active: root.hasWindow && root.win.pinned; available: root.hasWindow; onClicked: root.act("pop") }
-            Btn { width: root.cell(3); icon: "󰅖"; label: root.tr("close"); available: root.hasWindow; onClicked: root.act("close") }
+            Btn { width: root.cell(3); icon: "󰊓"; label: root.tr("fullscreen"); hint: root.hotkey("Full screen"); active: root.hasWindow && root.win.fullscreen === 2; available: root.hasWindow; onClicked: root.act("fullscreen") }
+            Btn { width: root.cell(3); icon: "󰁌"; label: root.tr("maximize"); hint: root.hotkey("Full width"); active: root.hasWindow && root.win.fullscreen === 1; available: root.hasWindow; onClicked: root.act("maximize") }
+            Btn { width: root.cell(3); icon: "󰖲"; label: root.tr("float"); hint: root.hotkey("Toggle window floating/tiling"); active: root.hasWindow && root.win.floating; available: root.hasWindow; onClicked: root.act("float") }
+            Btn { width: root.cell(3); icon: "󰐃"; label: root.tr("pin"); hint: root.hotkey("Pop window out (float & pin)"); active: root.hasWindow && root.win.pinned; available: root.hasWindow; onClicked: root.act("pop") }
+            Btn { width: root.cell(3); icon: "󰅖"; label: root.tr("close"); hint: root.hotkey("Close window"); available: root.hasWindow; onClicked: root.act("close") }
           }
 
           // ---- Split
@@ -254,7 +278,7 @@ Panel {
 
           Row {
             spacing: root.gap
-            Btn { width: root.cell(2); icon: "󰯌"; label: root.tr("toggleSplit"); available: root.tiled && root.dwindle; onClicked: root.act("togglesplit") }
+            Btn { width: root.cell(2); icon: "󰯌"; label: root.tr("toggleSplit"); hint: root.hotkey("Toggle window split"); available: root.tiled && root.dwindle; onClicked: root.act("togglesplit") }
             Btn { width: root.cell(2); icon: "󰓡"; label: root.tr("swapSides"); available: root.tiled && root.dwindle; onClicked: root.act("swapsplit") }
           }
 
@@ -284,13 +308,13 @@ Panel {
               columns: 3
               spacing: root.gap / 2
               Item { width: Style.space(34); height: Style.space(30) }
-              Btn { width: Style.space(34); height: Style.space(30); label: "↑"; available: root.tiled; onClicked: root.act("swap", "u") }
+              Btn { width: Style.space(34); height: Style.space(30); label: "↑"; hint: root.hotkey("Swap window up"); available: root.tiled; onClicked: root.act("swap", "u") }
               Item { width: Style.space(34); height: Style.space(30) }
-              Btn { width: Style.space(34); height: Style.space(30); label: "←"; available: root.tiled; onClicked: root.act("swap", "l") }
+              Btn { width: Style.space(34); height: Style.space(30); label: "←"; hint: root.hotkey("Swap window to the left"); available: root.tiled; onClicked: root.act("swap", "l") }
               Item { width: Style.space(34); height: Style.space(30) }
-              Btn { width: Style.space(34); height: Style.space(30); label: "→"; available: root.tiled; onClicked: root.act("swap", "r") }
+              Btn { width: Style.space(34); height: Style.space(30); label: "→"; hint: root.hotkey("Swap window to the right"); available: root.tiled; onClicked: root.act("swap", "r") }
               Item { width: Style.space(34); height: Style.space(30) }
-              Btn { width: Style.space(34); height: Style.space(30); label: "↓"; available: root.tiled; onClicked: root.act("swap", "d") }
+              Btn { width: Style.space(34); height: Style.space(30); label: "↓"; hint: root.hotkey("Swap window down"); available: root.tiled; onClicked: root.act("swap", "d") }
               Item { width: Style.space(34); height: Style.space(30) }
             }
 
@@ -310,6 +334,7 @@ Panel {
               Btn {
                 width: (root.innerWidth - 8 * root.gap / 2) / 9
                 label: String(index + 1)
+                hint: root.hotkey("Move window silently to workspace " + (index + 1))
                 active: root.hasWindow && root.win.workspace === index + 1
                 available: root.hasWindow && root.win.workspace !== index + 1
                 onClicked: root.act("workspace", index + 1)
@@ -337,6 +362,7 @@ Panel {
               width: root.cell(2)
               icon: "󱂬"
               label: root.tr("layout", root.info && root.info.layout ? root.info.layout : "dwindle")
+              hint: root.hotkey("Toggle workspace layout")
               available: root.hasWindow
               onClicked: root.act("layout")
             }
@@ -344,6 +370,7 @@ Panel {
               width: root.cell(2)
               icon: "󰕮"
               label: root.tr("gaps")
+              hint: root.hotkey("Toggle window gaps")
               active: root.info ? !root.info.gapsOff : false
               onClicked: root.act("gaps")
             }
@@ -356,7 +383,7 @@ Panel {
             Hint { text: root.tr("workspaceToDisplay"); height: Style.space(34); verticalAlignment: Text.AlignVCenter }
             Repeater {
               model: root.otherMonitors
-              Btn { width: root.cell(3); icon: "󰍺"; label: root.monitorLabel(modelData); available: root.hasWindow; onClicked: root.act("workspace-monitor", modelData.name) }
+              Btn { width: root.cell(3); icon: "󰍺"; label: root.monitorLabel(modelData); hint: root.directionalHotkey(); available: root.hasWindow; onClicked: root.act("workspace-monitor", modelData.name) }
             }
           }
 
@@ -408,6 +435,7 @@ Panel {
               width: root.cell(2)
               icon: "󰌢"
               label: root.tr("laptopDisplay")
+              hint: root.hotkey("Toggle laptop display")
               active: root.info ? !root.info.laptopOff : false
               // Omarchy refuses to turn off the only active display.
               available: root.info ? (root.info.laptopOff || root.info.monitors.length > 1) : false
@@ -417,6 +445,7 @@ Panel {
               width: root.cell(2)
               icon: "󰍺"
               label: root.tr("mirrorLaptop")
+              hint: root.hotkey("Toggle laptop display mirroring")
               active: root.info ? root.info.mirror : false
               onClicked: root.act("mirror")
             }
@@ -470,6 +499,7 @@ Panel {
     property string icon: ""
     property bool active: false
     property bool available: true
+    property string hint: ""
     signal clicked()
 
     height: Style.space(34)
@@ -512,6 +542,12 @@ Panel {
       enabled: btn.available && !root.busy
       cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
       onClicked: btn.clicked()
+    }
+
+    PanelToolTip {
+      visible: btn.hint !== "" && area.containsMouse
+      text: btn.hint
+      fontFamily: root.fontFamily
     }
   }
 }
