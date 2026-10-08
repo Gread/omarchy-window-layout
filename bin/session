@@ -246,6 +246,20 @@ dock() {
   setting laptopDock || return 0
   omarchy-hw-laptop 2>/dev/null || return 0
 
+  # Turning the laptop display off reconfigures the outputs, and doing that
+  # while the session is locked can leave the lock screen with no surface to
+  # draw on (Quickshell 0.3.1). Wait for the unlock first, outside the lock
+  # below so that turning the display back on is never held up behind it.
+  if [[ $event == added && -f $AUTO_ON ]] && omarchy-hyprland-session-locked; then
+    log "dock added: session locked, waiting for the unlock"
+    local waited=0
+    while omarchy-hyprland-session-locked; do
+      sleep 3
+      [[ -f $AUTO_ON ]] || return 0
+      ((waited += 3, waited < 3600)) || { log "dock added: still locked after 1 h, giving up"; return 0; }
+    done
+  fi
+
   exec 5>"$RUN/dock.lock"
   flock -w 15 5 || { log "dock $event: skipped, another run held the lock for 15 s"; return 0; }
 
