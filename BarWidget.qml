@@ -86,12 +86,17 @@ BarWidget {
     }
   }
 
+  // Only external displays matter. The laptop panel itself is "added" and
+  // "removed" whenever it is switched on or off, and FALLBACK comes and goes
+  // with the last display.
   Connections {
     target: Hyprland
     function onRawEvent(event) {
-      var name = event.name
-      if (name === "monitorremovedv2") root.dock("removed")
-      else if (name === "monitoraddedv2") root.dock("added")
+      if (event.name !== "monitorremovedv2" && event.name !== "monitoraddedv2") return
+      // v2 data: "ID,NAME,DESCRIPTION"
+      var monitor = String(event.data || "").split(",")[1] || ""
+      if (/^(eDP|LVDS|DSI)-|^FALLBACK$|^HEADLESS-/.test(monitor)) return
+      root.dock(event.name === "monitorremovedv2" ? "removed" : "added")
     }
   }
 
