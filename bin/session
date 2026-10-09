@@ -122,6 +122,14 @@ windows_of() {
     '[.[] | select(.mapped and .class == $c)] | sort_by(.focusHistoryID) | .[].address'
 }
 
+# The first window of this class that no earlier layout entry has claimed.
+unclaimed_window() {
+  local class="$1" used="$2" a
+  for a in $(windows_of "$class"); do
+    [[ $used == *" $a "* ]] || { echo "$a"; return; }
+  done
+}
+
 position_of() {
   hyprctl clients -j | jq -r --arg a "$1" '.[] | select(.address == $a) | "\(.at[0]) \(.at[1])"'
 }
@@ -130,7 +138,9 @@ launch_and_wait() {
   local class="$1" cmd="$2" before addr
   before=$(windows_of "$class")
   log "  opening: $cmd"
-  setsid bash -c "$cmd" </dev/null >/dev/null 2>&1 &
+  # Close the lock descriptors: an app inheriting them would hold the
+  # restore and login locks for as long as it runs.
+  setsid bash -c "$cmd" </dev/null >/dev/null 2>&1 5>&- 6>&- 7>&- &
   for _ in $(seq 1 120); do
     sleep 0.5
     addr=$(windows_of "$class" | grep -v -x -F -f <(printf '%s' "$before") | head -1)
@@ -140,7 +150,9 @@ launch_and_wait() {
 }
 
 restore() {
-  local login="${1:-}" start_ws count i ws class cmd addr used=" "
+  local login="${1:-}" start_ws count i ws class cmd addr used=" " last_launch=0
+  # At login other apps are starting too; treat the start like a launch.
+  [[ $login == "--login" ]] && last_launch=$EPOCHSECONDS
   [[ -f $LAYOUT ]] || die "no_layout"
 
   exec 7>"$RUN/restore.lock"
@@ -157,8 +169,20 @@ restore() {
 
     while IFS=$'\t' read -r -u 3 class cmd; do
       [[ -n $class ]] || continue
-      # An open window of this class that no earlier entry has claimed.
-      addr=$(windows_of "$class" | while read -r a; do [[ $used == *" $a "* ]] || { echo "$a"; break; }; done)
+      addr=$(unclaimed_window "$class" "$used")
+      # Something just started (this restore or the login) and may still be
+      # reopening its own windows, as a browser restoring its session reopens
+      # its web apps. Give it a moment before opening a duplicate.
+      if [[ -z $addr ]] && ((EPOCHSECONDS - last_launch < 20)); then
+        # A browser reopening a whole session takes longer for its web apps.
+        local tries=20
+        [[ $class == chrome-* ]] && tries=40
+        for _ in $(seq 1 "$tries"); do
+          sleep 0.5
+          addr=$(unclaimed_window "$class" "$used")
+          [[ -n $addr ]] && { log "  ws$ws: $class reopened by itself"; break; }
+        done
+      fi
       if [[ -z $addr ]]; then
         if [[ -z $cmd ]]; then
           log "  ws$ws: $class is not open and has no command"
@@ -168,6 +192,7 @@ restore() {
           log "  ws$ws: no $class window appeared within 60 s"
           continue
         }
+        last_launch=$EPOCHSECONDS
       fi
       used+="$addr "
       if [[ $(hyprctl clients -j | jq -r --arg a "$addr" '.[] | select(.address == $a) | .workspace.id') != "$ws" ]]; then
