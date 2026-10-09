@@ -59,7 +59,7 @@ BarWidget {
   // whose monitoradded event this widget never heard.
   Component.onCompleted: {
     loginProc.running = true
-    root.dock("added")
+    root.dock("startup")
   }
 
   Process {

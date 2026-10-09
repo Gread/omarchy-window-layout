@@ -4,7 +4,7 @@
 # Usage: session save               snapshot every workspace into layout.json
 #        session restore [--login]  reopen what is missing and put it back in place
 #        session login              restore once per Hyprland session, if enabled
-#        session dock removed|added|lid
+#        session dock removed|added|lid|startup
 #                                   laptop display follows the external display,
 #                                   if enabled
 #        session config set <restoreOnLogin|laptopDock> <true|false>
@@ -275,13 +275,18 @@ dock() {
   # while the session is locked can leave the lock screen with no surface to
   # draw on (Quickshell 0.3.1). Wait for the unlock first, outside the lock
   # below so that turning the display back on is never held up behind it.
-  if [[ $event == added && -f $AUTO_ON ]] && omarchy-hyprland-session-locked; then
-    log "dock added: session locked, waiting for the unlock"
+  # At shell startup (catching up on a plug the shell may have missed) only
+  # undo what this automation did: you may have turned the laptop display on
+  # yourself while docked.
+  if [[ $event == startup && ! -f $AUTO_ON ]]; then
+    return 0
+  fi
+  if [[ $event == added || $event == startup ]] && omarchy-hyprland-session-locked; then
+    log "dock $event: session locked, waiting for the unlock"
     local waited=0
     while omarchy-hyprland-session-locked; do
       sleep 3
-      [[ -f $AUTO_ON ]] || return 0
-      ((waited += 3, waited < 3600)) || { log "dock added: still locked after 1 h, giving up"; return 0; }
+      ((waited += 3, waited < 3600)) || { log "dock $event: still locked after 1 h, giving up"; return 0; }
     done
   fi
 
@@ -304,28 +309,26 @@ dock() {
       done
       [[ $event == removed ]] && log "dock removed: an external display is still active ($(monitors))"
       ;;
-    added)
-      # Only undo what this automation did. After a resume the external display
-      # can take several seconds to come up, so keep checking for a while.
-      [[ -f $AUTO_ON ]] || return 0
-      # Already off (e.g. you pressed Super+Ctrl+Delete yourself): nothing left
-      # to undo, and a stale marker must not turn it off later.
+    added | startup)
+      # Already off (e.g. you pressed Super+Ctrl+Delete yourself): nothing to do,
+      # and a stale marker must not turn it off later.
       if [[ -f $TOGGLE_FLAG ]]; then
         rm -f "$AUTO_ON"
-        log "dock added: laptop display was already off, cleared the marker"
         return 0
       fi
+      [[ $event == startup && ! -f $AUTO_ON ]] && return 0
+      # After a resume the external display can take several seconds to come
+      # up, so keep checking for a while.
       for attempt in 1 2 3 4 5 6 7 8 9 10; do
         sleep 1
-        [[ -f $AUTO_ON ]] || return 0
         if external_active; then
           rm -f "$AUTO_ON"
           omarchy-hyprland-monitor-internal off
-          log "dock added: laptop display off again (attempt $attempt; now: $(monitors))"
+          log "dock $event: laptop display off (attempt $attempt; now: $(monitors))"
           return 0
         fi
       done
-      log "dock added: no external display became active within 10 s ($(monitors))"
+      log "dock $event: no external display became active within 10 s ($(monitors))"
       ;;
   esac
 }
@@ -346,7 +349,7 @@ case "${1:-}" in
   restore) restore "${2:-}" ;;
   login) login ;;
   dock)
-    [[ ${2:-} =~ ^(removed|added|lid)$ ]] || die "invalid: event"
+    [[ ${2:-} =~ ^(removed|added|lid|startup)$ ]] || die "invalid: event"
     dock "$2"
     ;;
   config)
