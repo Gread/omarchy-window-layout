@@ -31,9 +31,14 @@ die() {
   exit 1
 }
 
+# Restore and dock runs write at the same time; the lock keeps a trim by one
+# from dropping a line written by the other.
 log() {
-  [[ -f $LOG && $(stat -c %s "$LOG") -gt 200000 ]] && tail -n 1000 "$LOG" >"$LOG.tmp" && mv "$LOG.tmp" "$LOG"
-  printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG"
+  {
+    flock 8
+    [[ -f $LOG && $(stat -c %s "$LOG") -gt 200000 ]] && tail -n 1000 "$LOG" >"$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+    printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG"
+  } 8>>"$LOG.lock"
 }
 
 setting() {

@@ -62,9 +62,11 @@ BarWidget {
     root.dock("startup")
   }
 
+  // Detached (setsid -f): the bar on a display that gets turned off is
+  // destroyed together with its processes, which would cut a restore short.
   Process {
     id: loginProc
-    command: ["bash", root.sessionScript, "login"]
+    command: ["setsid", "-f", "bash", root.sessionScript, "login"]
   }
 
   function dock(event) {
@@ -72,7 +74,7 @@ BarWidget {
       root.pendingDock = event
       return
     }
-    dockProc.command = ["bash", root.sessionScript, "dock", event]
+    dockProc.command = ["setsid", "-f", "bash", root.sessionScript, "dock", event]
     dockProc.running = true
   }
 
