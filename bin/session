@@ -294,6 +294,12 @@ dock() {
   # At shell startup (catching up on a plug the shell may have missed) only
   # undo what this automation did: you may have turned the laptop display on
   # yourself while docked.
+  # The first startup of a Hyprland session (login) is handled like a plug:
+  # a display connected before boot never sends a monitoradded event.
+  if [[ $event == startup && ! -f $RUN/docked-$HYPRLAND_INSTANCE_SIGNATURE ]]; then
+    touch "$RUN/docked-$HYPRLAND_INSTANCE_SIGNATURE"
+    event=added
+  fi
   if [[ $event == startup && ! -f $AUTO_ON ]]; then
     return 0
   fi
