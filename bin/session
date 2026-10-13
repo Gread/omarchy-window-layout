@@ -260,6 +260,22 @@ monitors() {
   hyprctl monitors all -j | jq -r -c '[.[] | "\(.name):\(if .disabled then "off" else "on" end)"] | join(" ")'
 }
 
+# Largest active external display as WIDTHxHEIGHT (empty when none).
+external_mode() {
+  hyprctl monitors all -j | jq -r '[.[]
+    | select(.name | test("^(eDP|LVDS|DSI)-|^FALLBACK$|^HEADLESS-") | not)
+    | select(.disabled == false)] | max_by(.width) // empty | "\(.width)x\(.height)"'
+}
+
+# A display whose EDID could not be read (it happens when a Thunderbolt monitor
+# is plugged while it is still waking up) comes up in a fallback mode such as
+# 720x400 and stays black. Never leave the laptop display off for one of those.
+external_broken() {
+  local mode
+  mode=$(external_mode)
+  [[ -n $mode ]] && ((${mode%x*} < 1024))
+}
+
 external_active() {
   hyprctl monitors all -j | jq -e '.[]
     | select(.name | test("^(eDP|LVDS|DSI)-|^FALLBACK$|^HEADLESS-") | not)
@@ -310,6 +326,18 @@ dock() {
       [[ $event == removed ]] && log "dock removed: an external display is still active ($(monitors))"
       ;;
     added | startup)
+      # Give the display a moment to settle, then make sure it really works
+      # before the laptop display stays off (Omarchy itself may already have
+      # turned it off).
+      sleep 3
+      if external_broken; then
+        touch "$AUTO_ON"
+        omarchy-hyprland-monitor-internal on
+        log "dock $event: external display came up as $(external_mode), its EDID was not read; laptop display kept on ($(monitors))"
+        notify-send -a "Window Layout" -i video-display "External display did not start properly" \
+          "It came up as $(external_mode). Unplug it and plug it in again." 2>/dev/null
+        return 0
+      fi
       # Already off (e.g. you pressed Super+Ctrl+Delete yourself): nothing to do,
       # and a stale marker must not turn it off later.
       if [[ -f $TOGGLE_FLAG ]]; then
