@@ -155,7 +155,7 @@ launch_and_wait() {
 }
 
 restore() {
-  local login="${1:-}" start_ws count i ws class cmd addr used=" " last_launch=0
+  local login="${1:-}" start_ws count i ws class cmd addr used=" " last_launch=0 splits=()
   # At login other apps are starting too; treat the start like a launch.
   [[ $login == "--login" ]] && last_launch=$EPOCHSECONDS
   [[ -f $LAYOUT ]] || die "no_layout"
@@ -207,37 +207,42 @@ restore() {
       log "  ws$ws: $class → $addr"
     done 3< <(jq -r ".workspaces[$i].apps[] | \"\(.class)\t\(.command)\"" "$LAYOUT")
 
-    # Two windows: same direction, same order, same ratio as when saved.
+    # Two windows: their split is fixed after every workspace is filled
+    # (see below).
     if ((${#placed[@]} == 2)); then
-      local split ratio first second fx fy sx sy
-      split=$(jq -r ".workspaces[$i].split" "$LAYOUT")
-      ratio=$(jq -r ".workspaces[$i].ratio" "$LAYOUT")
-      [[ $ratio =~ ^[0-9]+(\.[0-9]+)?$ ]] || ratio=1
-      first=${placed[0]} second=${placed[1]}
-      sleep 0.3
-      read -r fx fy < <(position_of "$first")
-      read -r sx sy < <(position_of "$second")
-      [[ -n ${fx:-} && -n ${sx:-} ]] || continue
-
-      dispatch "hl.dsp.focus({ window = \"address:$first\" })"
-      if [[ $split == "side" && $fx == "$sx" ]] || [[ $split == "stacked" && $fy == "$sy" ]]; then
-        dispatch 'hl.dsp.layout("togglesplit")'
-        sleep 0.2
-        read -r fx fy < <(position_of "$first")
-        read -r sx sy < <(position_of "$second")
-      fi
-      if { [[ $split == "side" ]] && ((fx > sx)); } || { [[ $split == "stacked" ]] && ((fy > sy)); }; then
-        dispatch 'hl.dsp.layout("swapsplit")'
-      fi
-      dispatch "hl.dsp.layout(\"splitratio $ratio exact\")"
-      log "  ws$ws: $split, ratio $ratio"
+      splits+=("$ws ${placed[0]} ${placed[1]} $(jq -r ".workspaces[$i].split" "$LAYOUT") $(jq -r ".workspaces[$i].ratio" "$LAYOUT")")
     fi
   done
 
-  # At login end on the first saved workspace; otherwise back where you were.
-  local end_ws=$start_ws
-  [[ $login == "--login" ]] && end_ws=$(jq -r '.workspaces[0].id // 1' "$LAYOUT")
-  [[ $end_ws =~ ^[0-9]+$ ]] && dispatch "hl.dsp.focus({ workspace = \"$end_ws\" })"
+  # Same direction, same order, same ratio as when saved. The layout
+  # dispatchers act on the focused window, so this has to visit each
+  # workspace: done here in one quick pass rather than while apps are still
+  # starting, then back to wherever you are by now.
+  local here job split ratio first second fx fy sx sy
+  here=$(hyprctl activeworkspace -j | jq -r .id)
+  [[ $login == "--login" && $here == "$start_ws" ]] && here=$(jq -r '.workspaces[0].id // 1' "$LAYOUT")
+  for job in "${splits[@]}"; do
+    read -r ws first second split ratio <<<"$job"
+    [[ $ratio =~ ^[0-9]+(\.[0-9]+)?$ ]] || ratio=1
+    read -r fx fy < <(position_of "$first")
+    read -r sx sy < <(position_of "$second")
+    [[ -n ${fx:-} && -n ${sx:-} ]] || continue
+
+    dispatch "hl.dsp.focus({ window = \"address:$first\" })"
+    if [[ $split == "side" && $fx == "$sx" ]] || [[ $split == "stacked" && $fy == "$sy" ]]; then
+      dispatch 'hl.dsp.layout("togglesplit")'
+      sleep 0.1
+      read -r fx fy < <(position_of "$first")
+      read -r sx sy < <(position_of "$second")
+    fi
+    if { [[ $split == "side" ]] && ((fx > sx)); } || { [[ $split == "stacked" ]] && ((fy > sy)); }; then
+      dispatch 'hl.dsp.layout("swapsplit")'
+    fi
+    dispatch "hl.dsp.layout(\"splitratio $ratio exact\")"
+    log "  ws$ws: $split, ratio $ratio"
+  done
+
+  [[ $here =~ ^[0-9]+$ ]] && dispatch "hl.dsp.focus({ workspace = \"$here\" })"
   log "restore done"
 }
 
