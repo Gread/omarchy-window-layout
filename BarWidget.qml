@@ -101,7 +101,10 @@ BarWidget {
   }
 
   // No real display left (only Hyprland's virtual FALLBACK): typically the lid
-  // opened, or the system resumed, while the laptop display was off.
+  // opened, or the system resumed, while the laptop display was off. The
+  // shell's monitor list can miss events across a suspend (an unplug while
+  // asleep left a display listed that was gone), so re-read it from Hyprland
+  // on every tick.
   Timer {
     interval: 3000
     repeat: true
@@ -109,6 +112,8 @@ BarWidget {
     onTriggered: {
       var real = Hyprland.monitors.values.filter(function(m) { return !/^(FALLBACK|HEADLESS-)/.test(m.name) })
       if (real.length === 0) root.dock("lid")
+      // The refresh answers asynchronously; the next tick sees its result.
+      Hyprland.refreshMonitors()
     }
   }
 
