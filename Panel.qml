@@ -108,7 +108,7 @@ Panel {
     if (root.busy) return
     var args = [action]
     if (action === "display") {
-      args.push(String(arg))
+      args = args.concat(String(arg).split(" "))
     } else if (action !== "gaps" && action !== "laptop" && action !== "mirror") {
       if (!root.hasWindow) return
       args.push(root.target)
@@ -458,6 +458,33 @@ Panel {
               active: root.info ? root.info.mirror : false
               available: root.hasExternal
               onClicked: root.act("display", "mirror")
+            }
+          }
+
+          Hint {
+            visible: root.info ? root.info.laptop !== "" : false
+            width: root.innerWidth
+            text: root.tr("externalSide")
+          }
+
+          Row {
+            visible: root.info ? root.info.laptop !== "" : false
+            spacing: root.gap
+            Repeater {
+              model: [
+                { side: "left", icon: "󰁍", label: "left" },
+                { side: "up", icon: "󰁝", label: "up" },
+                { side: "down", icon: "󰁅", label: "down" },
+                { side: "right", icon: "󰁔", label: "right" }
+              ]
+              Btn {
+                width: root.cell(4)
+                icon: modelData.icon
+                label: root.tr(modelData.label)
+                active: root.hasExternal && !root.info.laptopOff && !root.info.mirror && root.info.side === modelData.side
+                available: root.hasExternal
+                onClicked: root.act("display", "extend " + modelData.side)
+              }
             }
           }
 

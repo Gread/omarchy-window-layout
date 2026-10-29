@@ -4,7 +4,7 @@
 # Usage: window-layout status [window-address]
 #        window-layout <action> <window-address> [argument]
 #        window-layout gaps|laptop|mirror
-#        window-layout display external|extend|mirror
+#        window-layout display external|extend|mirror [right|left|up|down]
 #
 # The panel captures the window that was focused when it opened and passes its
 # address, because the panel holds keyboard focus while it is open. Arguments
@@ -15,6 +15,10 @@
 set -u
 
 TOGGLES="$HOME/.local/state/omarchy/toggles/hypr"
+# Which side of the laptop the external display sits on when extended. Omarchy
+# sources every file in $TOGGLES after monitors.lua; the catch-all output rule
+# here only changes the position, and rules for a named output still win.
+SIDE_FLAG="$TOGGLES/gread-external-side.lua"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/gread.window-layout"
 
 die() {
@@ -41,6 +45,7 @@ status() {
     --arg laptop "$laptop" \
     --argjson laptopOff "$([[ -f $TOGGLES/internal-monitor-disable.lua ]] && echo true || echo false)" \
     --argjson mirror "$([[ -f $TOGGLES/internal-monitor-mirror.lua ]] && echo true || echo false)" \
+    --arg side "$(sed -n 's/.*position = "auto-\([a-z]*\)".*/\1/p' "$SIDE_FLAG" 2>/dev/null)" \
     --argjson gapsOff "$([[ -f $TOGGLES/window-no-gaps.lua ]] && echo true || echo false)" \
     --argjson config "$(jq -c . "$CONFIG_DIR/config.json" 2>/dev/null || echo '{}')" \
     --argjson saved "$(jq -c '{savedAt, workspaces: (.workspaces | length), apps: ([.workspaces[].apps[]] | length)}' "$CONFIG_DIR/layout.json" 2>/dev/null || echo null)" '
@@ -64,6 +69,7 @@ status() {
         laptop: $laptop,
         laptopOff: $laptopOff,
         mirror: $mirror,
+        side: (if $side == "" then "right" else $side end),
         gapsOff: $gapsOff,
         restoreOnLogin: ($config.restoreOnLogin == true),
         laptopDock: ($config.laptopDock == true),
@@ -105,8 +111,23 @@ case "$action" in
         omarchy-hyprland-monitor-internal-mirror off >/dev/null
         omarchy-hyprland-monitor-internal off >/dev/null ;;
       extend)
+        side="${3:-}"
+        case "$side" in
+          "") ;;
+          right) rm -f "$SIDE_FLAG" ;;
+          left | up | down)
+            # The laptop stays at 0x0 so the external one lands on that side of it.
+            laptop=$(omarchy-hyprland-monitor-laptop 2>/dev/null)
+            [[ $laptop =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid: laptop"
+            mkdir -p "$TOGGLES"
+            printf '%s\n' \
+              "hl.monitor({ output = \"$laptop\", mode = \"preferred\", position = \"0x0\", scale = 1 })" \
+              "hl.monitor({ output = \"\", mode = \"preferred\", position = \"auto-$side\", scale = 1 })" >"$SIDE_FLAG" ;;
+          *) die "invalid: side" ;;
+        esac
         omarchy-hyprland-monitor-internal-mirror off >/dev/null
-        omarchy-hyprland-monitor-internal on >/dev/null ;;
+        omarchy-hyprland-monitor-internal on >/dev/null
+        hyprctl reload >/dev/null ;;
       mirror) omarchy-hyprland-monitor-internal-mirror on >/dev/null ;;
       *) die "invalid: display" ;;
     esac
