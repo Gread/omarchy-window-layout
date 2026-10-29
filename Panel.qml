@@ -103,11 +103,13 @@ Panel {
     actionProc.running = true
   }
 
-  // Window actions carry the captured address; gaps/laptop/mirror are global.
+  // Window actions carry the captured address; gaps/laptop/mirror/display are global.
   function act(action, arg) {
     if (root.busy) return
     var args = [action]
-    if (action !== "gaps" && action !== "laptop" && action !== "mirror") {
+    if (action === "display") {
+      args.push(String(arg))
+    } else if (action !== "gaps" && action !== "laptop" && action !== "mirror") {
       if (!root.hasWindow) return
       args.push(root.target)
       if (arg !== undefined) args.push(String(arg))
@@ -432,22 +434,30 @@ Panel {
             visible: root.info ? root.info.laptop !== "" : false
             spacing: root.gap
             Btn {
-              width: root.cell(2)
-              icon: "󰌢"
-              label: root.tr("laptopDisplay")
+              width: root.cell(3)
+              icon: "󰍹"
+              label: root.tr("externalOnly")
               hint: root.hotkey("Toggle laptop display")
-              active: root.info ? !root.info.laptopOff : false
-              // Omarchy refuses to turn off the only active display.
-              available: root.info ? (root.info.laptopOff || root.info.monitors.length > 1) : false
-              onClicked: root.act("laptop")
+              active: root.info ? root.info.laptopOff && !root.info.mirror : false
+              available: root.hasExternal
+              onClicked: root.act("display", "external")
             }
             Btn {
-              width: root.cell(2)
+              width: root.cell(3)
               icon: "󰍺"
+              label: root.tr("extend")
+              active: root.hasExternal && !root.info.laptopOff && !root.info.mirror
+              available: root.hasExternal
+              onClicked: root.act("display", "extend")
+            }
+            Btn {
+              width: root.cell(3)
+              icon: "󰑖"
               label: root.tr("mirrorLaptop")
               hint: root.hotkey("Toggle laptop display mirroring")
               active: root.info ? root.info.mirror : false
-              onClicked: root.act("mirror")
+              available: root.hasExternal
+              onClicked: root.act("display", "mirror")
             }
           }
 
@@ -481,6 +491,11 @@ Panel {
       }
     }
   }
+
+  // An external display is connected (also while the laptop display is off or mirrored).
+  readonly property bool hasExternal: root.info
+    ? (root.info.laptopOff || root.info.mirror || root.info.monitors.length > 1)
+    : false
 
   function cell(columns) {
     return (root.innerWidth - (columns - 1) * root.gap) / columns

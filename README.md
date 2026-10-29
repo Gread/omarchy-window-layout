@@ -19,7 +19,7 @@ shown at the top, so you always know what a button will change.
 | **Move window** | Swap with the neighbor (↑ ← → ↓) · Send to workspace 1–9 · Send to another display |
 | **Workspace** | Toggle dwindle/scrolling layout · Toggle gaps · Move the workspace to another display |
 | **Saved layout** | Save current · Restore · Restore at login |
-| **Displays** (laptops) | Laptop display on/off · Mirror the laptop display · Automatic laptop display |
+| **Displays** (laptops) | External only · Extend (both side by side) · Mirror the laptop display · Automatic laptop display |
 
 Buttons that don't apply right now are dimmed. For example, split ratios need a
 tiled window on a dwindle workspace. Buttons for moving to another display only

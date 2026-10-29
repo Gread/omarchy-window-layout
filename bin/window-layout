@@ -4,6 +4,7 @@
 # Usage: window-layout status [window-address]
 #        window-layout <action> <window-address> [argument]
 #        window-layout gaps|laptop|mirror
+#        window-layout display external|extend|mirror
 #
 # The panel captures the window that was focused when it opened and passes its
 # address, because the panel holds keyboard focus while it is open. Arguments
@@ -96,6 +97,20 @@ case "$action" in
   gaps) omarchy-hyprland-window-gaps-toggle >/dev/null; exit ;;
   laptop) omarchy-hyprland-monitor-internal toggle >/dev/null; exit ;;
   mirror) omarchy-hyprland-monitor-internal-mirror toggle >/dev/null; exit ;;
+  # Display modes with an external monitor: external only, both side by side,
+  # or the laptop mirrored to the external one.
+  display)
+    case "${2:-}" in
+      external)
+        omarchy-hyprland-monitor-internal-mirror off >/dev/null
+        omarchy-hyprland-monitor-internal off >/dev/null ;;
+      extend)
+        omarchy-hyprland-monitor-internal-mirror off >/dev/null
+        omarchy-hyprland-monitor-internal on >/dev/null ;;
+      mirror) omarchy-hyprland-monitor-internal-mirror on >/dev/null ;;
+      *) die "invalid: display" ;;
+    esac
+    exit ;;
 esac
 
 addr="${2:-}"
