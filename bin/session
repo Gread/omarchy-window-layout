@@ -154,6 +154,17 @@ launch_and_wait() {
   return 1
 }
 
+# Omarchy 4.5 gives every monitor its own workspaces 1-10: the n-th block of
+# ten belongs to one physical monitor, recorded in this state file as
+# "block<TAB>connector<TAB>identity". A saved workspace is a slot 1-10, so it
+# lands on the focused monitor's block, where Super + number finds it.
+focused_block() {
+  local connector
+  connector=$(hyprctl monitors -j | jq -r '.[] | select(.focused) | .name')
+  awk -F'\t' -v c="$connector" '$2 == c { print $1; exit }' \
+    "${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/monitor-workspaces" 2>/dev/null | grep -E '^[0-9]+$' || echo 0
+}
+
 restore() {
   local login="${1:-}" start_ws count i ws class cmd addr used=" " last_launch=0 splits=()
   # At login other apps are starting too; treat the start like a launch.
@@ -164,12 +175,15 @@ restore() {
   flock -n 7 || return 0
 
   start_ws=$(hyprctl activeworkspace -j | jq -r .id)
-  log "restore${login:+ ($login)}"
+  local block
+  block=$(focused_block)
+  log "restore${login:+ ($login)} (workspaces $((block * 10 + 1))-$((block * 10 + 10)))"
 
   count=$(jq '.workspaces | length' "$LAYOUT")
   for ((i = 0; i < count; i++)); do
     ws=$(jq -r ".workspaces[$i].id" "$LAYOUT")
-    [[ $ws =~ ^[0-9]+$ ]] || continue
+    [[ $ws =~ ^[0-9]+$ && $ws -gt 0 ]] || continue
+    ws=$((block * 10 + (ws - 1) % 10 + 1))
     local placed=()
 
     while IFS=$'\t' read -r -u 3 class cmd; do
@@ -220,7 +234,10 @@ restore() {
   # starting, then back to wherever you are by now.
   local here job split ratio first second fx fy sx sy
   here=$(hyprctl activeworkspace -j | jq -r .id)
-  [[ $login == "--login" && $here == "$start_ws" ]] && here=$(jq -r '.workspaces[0].id // 1' "$LAYOUT")
+  if [[ $login == "--login" && $here == "$start_ws" ]]; then
+    here=$(jq -r '.workspaces[0].id // 1' "$LAYOUT")
+    [[ $here =~ ^[0-9]+$ ]] && here=$((block * 10 + (here - 1) % 10 + 1))
+  fi
   for job in "${splits[@]}"; do
     read -r ws first second split ratio <<<"$job"
     [[ $ratio =~ ^[0-9]+(\.[0-9]+)?$ ]] || ratio=1
